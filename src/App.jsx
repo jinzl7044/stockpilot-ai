@@ -38,6 +38,11 @@ const defaultAnalysis = {
   rsi: '等待分析',
   macd: '等待分析',
   suggestion: '目前尚未取得 FinMind 資料',
+  tradeAction: '尚未分析',
+  entryZone: '等待分析',
+  stopLoss: '等待分析',
+  takeProfit1: '等待分析',
+  takeProfit2: '等待分析',
 }
 
 export default function App() {
@@ -164,6 +169,7 @@ export default function App() {
       setAnalysis({
         ...defaultAnalysis,
         status: '分析失敗',
+        tradeAction: '分析失敗',
         pattern: error.message || 'FinMind 資料讀取失敗',
         suggestion: '請確認股票代號是否正確，或稍後再試',
       })
@@ -314,15 +320,18 @@ export default function App() {
                 </div>
 
                 <div className="rounded-full bg-emerald-500 px-5 py-2 font-bold text-black">
-                  {analysis.status}
+                  {analysis.tradeAction || analysis.status}
                 </div>
               </div>
 
               <div className="grid gap-4 md:grid-cols-4">
                 {[
                   ['現價', analysis.price],
+                  ['建議進場', analysis.entryZone],
+                  ['停損價', analysis.stopLoss],
+                  ['第一停利', analysis.takeProfit1],
+                  ['第二停利', analysis.takeProfit2],
                   ['支撐位', analysis.support],
-                  ['壓力位', analysis.resistance],
                   ['風險報酬', analysis.riskReward],
                 ].map((item) => (
                   <div
@@ -336,11 +345,14 @@ export default function App() {
               </div>
 
               <div className="mt-6 space-y-2 text-lg leading-relaxed text-zinc-200">
-                <p>• AI 判斷：{analysis.status}</p>
-                <p>• K 棒型態：{analysis.pattern}</p>
+                <p>• 操作判斷：{analysis.tradeAction || analysis.status}</p>
+                <p>• 技術條件：{analysis.pattern}</p>
                 <p>• RSI：{analysis.rsi}</p>
                 <p>• MACD / 趨勢：{analysis.macd}</p>
                 <p>• 建議：{analysis.suggestion}</p>
+                <p className="text-sm text-zinc-400">
+                  本分析僅供技術分析參考，不構成投資建議，也不保證獲利。
+                </p>
               </div>
             </div>
           </div>
@@ -357,8 +369,8 @@ export default function App() {
               <div className="space-y-3 text-zinc-300">
                 <p>✓ Google 登入</p>
                 <p>✓ Firestore 會員資料同步</p>
-                <p>✓ 免費會員自選股上限：{member?.watchlistLimit || 3} 檔</p>
-                <p>✓ FinMind 台股資料分析</p>
+                <p>✓ FinMind 台股資料</p>
+                <p>✓ 進場 / 停損 / 停利分析</p>
                 <p>✓ 自動取得台股名稱</p>
               </div>
 
@@ -449,56 +461,6 @@ export default function App() {
           </div>
         </section>
 
-        <section className="mt-8 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-3xl border border-white/10 bg-zinc-900 p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <h3 className="text-2xl font-bold">AI 即時通知中心</h3>
-              <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-sm text-emerald-300">
-                即時同步
-              </span>
-            </div>
-
-            <div className="space-y-3">
-              {notifications.map((item) => (
-                <div
-                  key={item}
-                  className="rounded-2xl border border-white/10 bg-black/30 p-4 text-zinc-300"
-                >
-                  {item}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-zinc-900 p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <h3 className="text-2xl font-bold">後台會員管理</h3>
-
-              <button
-                type="button"
-                className="rounded-xl bg-emerald-500 px-4 py-2 font-bold text-black"
-              >
-                新增會員
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/30 p-4">
-                <div>
-                  <p className="font-bold">
-                    {user?.displayName || 'DemoUser'}
-                  </p>
-                  <p className="text-sm text-zinc-400">{memberPlanText}</p>
-                </div>
-
-                <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-sm text-emerald-300">
-                  啟用中
-                </span>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <section className="mt-8 rounded-3xl border border-white/10 bg-zinc-900 p-6">
           <div className="mb-6 flex items-center justify-between">
             <div>
@@ -519,7 +481,7 @@ export default function App() {
               'Firestore DB',
               'FinMind API',
               'Stock Info',
-              'Technical Analysis',
+              'Entry / Exit Plan',
               'LINE / Discord',
             ].map((service) => (
               <div
