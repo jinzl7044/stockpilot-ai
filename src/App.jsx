@@ -101,12 +101,6 @@ export default function App() {
   const currentName =
     stockInfoMap[selectedStock] || backupStockNames[selectedStock] || '台股'
 
-  const notifications = [
-    `${selectedStock} ${currentName} 已切換分析標的`,
-    lastAnalyzedAt ? `最近分析時間：${lastAnalyzedAt}` : '尚未執行 FinMind 分析',
-    limitStatus?.message || '等待會員額度同步',
-  ]
-
   const memberPlanText = member?.plan === 'pro' ? 'Pro 會員' : '免費會員'
   const memberBadgeText = member?.plan === 'pro' ? 'Pro' : 'Free'
 
@@ -315,9 +309,26 @@ export default function App() {
       return
     }
 
+    const lineId = window.prompt(
+      '請輸入你的 LINE ID，管理員會聯絡你開通 Pro：'
+    )
+
+    if (!lineId) {
+      alert('你尚未輸入 LINE ID，已取消申請。')
+      return
+    }
+
+    const note = window.prompt(
+      '可以留下備註，例如想開通的方案、付款方式；沒有可直接按確定：'
+    )
+
     try {
-      await createUpgradeRequest(db, user)
-      alert('已送出 Pro 升級申請，管理員會透過你的登入 Email 聯絡你。')
+      await createUpgradeRequest(db, user, {
+        lineId,
+        note: note || '',
+      })
+
+      alert('已送出 Pro 升級申請，管理員會透過 LINE 或 Email 聯絡你。')
     } catch (error) {
       console.error('Upgrade request error:', error)
       alert(error.message || '送出升級申請失敗，請稍後再試。')
