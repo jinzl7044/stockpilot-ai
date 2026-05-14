@@ -121,10 +121,10 @@ export default function App() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
             <h1 className="text-3xl font-black tracking-tight text-emerald-400">
-              StockPilot AI
+              6767sixseven
             </h1>
             <p className="text-sm text-zinc-400">
-              AI 幫你判斷現在該不該進場
+              股票分析與交易67平台
             </p>
           </div>
 
