@@ -11,6 +11,12 @@ import {
   saveAnalysisHistory,
 } from './lib/analysisHistory'
 import {
+  getMemberLimitStatus,
+  recordAnalysisUsage,
+  FREE_DAILY_ANALYSIS_LIMIT,
+} from './lib/memberLimits'
+import { createUpgradeRequest } from './lib/upgradeRequest'
+import {
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
@@ -35,7 +41,6 @@ const backupStockNames = {
 const defaultAnalysis = {
   price: '等待分析',
   support: '等待分析',
-  resistance: '等待分析',
   riskReward: '等待分析',
   status: '尚未分析',
   pattern: '請輸入股票代號並按 AI 分析',
@@ -49,6 +54,30 @@ const defaultAnalysis = {
   takeProfit2: '等待分析',
 }
 
+function getFriendlyErrorMessage(error) {
+  const message = error?.message || ''
+
+  if (message.includes('Failed to fetch')) {
+    return {
+      title: '資料連線失敗',
+      detail:
+        '目前無法連到 FinMind 股價資料，可能是網路不穩、API 暫時無回應，或瀏覽器擋住請求。請稍後再試。',
+    }
+  }
+
+  if (message.includes('FinMind')) {
+    return {
+      title: 'FinMind 資料讀取失敗',
+      detail: 'FinMind 回傳異常，請稍後再試或確認股票代號是否正確。',
+    }
+  }
+
+  return {
+    title: '分析失敗',
+    detail: message || '請確認股票代號是否正確，或稍後再試。',
+  }
+}
+
 export default function App() {
   const [user, setUser] = useState(null)
   const [member, setMember] = useState(null)
@@ -60,6 +89,7 @@ export default function App() {
   const [analysis, setAnalysis] = useState(defaultAnalysis)
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState('')
   const [history, setHistory] = useState([])
+  const [limitStatus, setLimitStatus] = useState(null)
 
   const watchlist = [
     { code: '2330', name: stockInfoMap['2330'] || '台積電', signal: 'AI 看多' },
@@ -74,10 +104,16 @@ export default function App() {
   const notifications = [
     `${selectedStock} ${currentName} 已切換分析標的`,
     lastAnalyzedAt ? `最近分析時間：${lastAnalyzedAt}` : '尚未執行 FinMind 分析',
-    Object.keys(stockInfoMap).length > 0
-      ? '台股名稱資料已同步'
-      : '台股名稱資料同步中',
+    limitStatus?.message || '等待會員額度同步',
   ]
+
+  const memberPlanText = member?.plan === 'pro' ? 'Pro 會員' : '免費會員'
+  const memberBadgeText = member?.plan === 'pro' ? 'Pro' : 'Free'
+
+  const analysisUsageText =
+    member?.plan === 'pro'
+      ? '不限次數'
+      : `${limitStatus?.count || 0} / ${FREE_DAILY_ANALYSIS_LIMIT}`
 
   useEffect(() => {
     async function loadStockInfo() {
@@ -127,6 +163,8 @@ export default function App() {
                 line: false,
                 discord: false,
               },
+              dailyAnalysisCount: 0,
+              dailyAnalysisDate: '',
               createdAt: serverTimestamp(),
               lastLoginAt: serverTimestamp(),
             }
@@ -149,9 +187,13 @@ export default function App() {
 
           const recentHistory = await fetchAnalysisHistory(db, currentUser)
           setHistory(recentHistory)
+
+          const quota = await getMemberLimitStatus(db, currentUser)
+          setLimitStatus(quota)
         } else {
           setMember(null)
           setHistory([])
+          setLimitStatus(null)
         }
       } catch (error) {
         console.error('Firebase member sync error:', error)
@@ -174,36 +216,70 @@ export default function App() {
     }
   }
 
+  const refreshLimitStatus = async (targetUser = user) => {
+    if (!db || !targetUser) return
+
+    try {
+      const quota = await getMemberLimitStatus(db, targetUser)
+      setLimitStatus(quota)
+    } catch (error) {
+      console.error('Limit load error:', error)
+    }
+  }
+
   const runAnalysis = async (stockCode) => {
+    if (!user) {
+      alert('請先登入 Google 後再使用 AI 分析。')
+      return
+    }
+
     setAnalyzing(true)
 
     try {
+      const quota = await getMemberLimitStatus(db, user)
+      setLimitStatus(quota)
+
+      if (!quota.allowed) {
+        setAnalysis({
+          ...defaultAnalysis,
+          status: '額度已用完',
+          tradeAction: '額度已用完',
+          pattern: '免費會員今日分析次數已達上限',
+          suggestion: quota.message,
+        })
+        alert(quota.message)
+        return
+      }
+
       const rows = await fetchTaiwanStockPrices(stockCode, 180)
       const result = analyzeTaiwanStock(rows)
+
       const stockName =
         stockInfoMap[stockCode] || backupStockNames[stockCode] || '台股'
 
       setAnalysis(result)
       setLastAnalyzedAt(new Date().toLocaleString('zh-TW'))
 
-      if (user && db) {
-        await saveAnalysisHistory(db, user, {
-          stockCode,
-          stockName,
-          analysis: result,
-        })
+      await saveAnalysisHistory(db, user, {
+        stockCode,
+        stockName,
+        analysis: result,
+      })
 
-        await refreshHistory(user)
-      }
+      await recordAnalysisUsage(db, user)
+      await refreshHistory(user)
+      await refreshLimitStatus(user)
     } catch (error) {
       console.error('Analyze error:', error)
 
+      const friendly = getFriendlyErrorMessage(error)
+
       setAnalysis({
         ...defaultAnalysis,
-        status: '分析失敗',
-        tradeAction: '分析失敗',
-        pattern: error.message || 'FinMind 資料讀取失敗',
-        suggestion: '請確認股票代號是否正確，或稍後再試',
+        status: friendly.title,
+        tradeAction: friendly.title,
+        pattern: friendly.detail,
+        suggestion: friendly.detail,
       })
     } finally {
       setAnalyzing(false)
@@ -233,6 +309,21 @@ export default function App() {
     }
   }
 
+  const handleUpgradeRequest = async () => {
+    if (!user) {
+      alert('請先登入 Google 後再申請升級 Pro。')
+      return
+    }
+
+    try {
+      await createUpgradeRequest(db, user)
+      alert('已送出 Pro 升級申請，管理員會透過你的登入 Email 聯絡你。')
+    } catch (error) {
+      console.error('Upgrade request error:', error)
+      alert(error.message || '送出升級申請失敗，請稍後再試。')
+    }
+  }
+
   const handleAnalyze = async () => {
     const cleaned = stockInput.trim().replace(/\D/g, '')
 
@@ -256,9 +347,6 @@ export default function App() {
 
     return createdAt.toDate().toLocaleString('zh-TW')
   }
-
-  const memberPlanText = member?.plan === 'pro' ? 'Pro 會員' : '免費會員'
-  const memberBadgeText = member?.plan === 'pro' ? 'Pro' : 'Free'
 
   return (
     <div className="min-h-screen bg-[#0f1115] text-white">
@@ -404,6 +492,16 @@ export default function App() {
                 </span>
               </div>
 
+              <div className="mb-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+                <p className="text-sm text-zinc-400">今日分析額度</p>
+                <p className="mt-2 text-2xl font-black text-emerald-300">
+                  {analysisUsageText}
+                </p>
+                <p className="mt-1 text-sm text-zinc-400">
+                  {limitStatus?.message || '登入後同步分析額度'}
+                </p>
+              </div>
+
               <div className="space-y-3 text-zinc-300">
                 <p>✓ Google 登入</p>
                 <p>✓ Firestore 會員資料同步</p>
@@ -414,9 +512,10 @@ export default function App() {
 
               <button
                 type="button"
+                onClick={handleUpgradeRequest}
                 className="mt-6 w-full rounded-2xl bg-emerald-500 py-4 text-lg font-black text-black hover:bg-emerald-400"
               >
-                升級 Pro 會員
+                申請升級 Pro 會員
               </button>
             </div>
 
@@ -543,40 +642,6 @@ export default function App() {
                 綁定 Discord
               </button>
             </div>
-          </div>
-        </section>
-
-        <section className="mt-8 rounded-3xl border border-white/10 bg-zinc-900 p-6">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h3 className="text-3xl font-black">系統整合狀態</h3>
-              <p className="mt-1 text-zinc-400">
-                6767sixseven 雲端整合模組
-              </p>
-            </div>
-
-            <div className="rounded-full bg-emerald-500 px-5 py-2 font-bold text-black">
-              Online
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-            {[
-              'Firebase Auth',
-              'Firestore DB',
-              'FinMind API',
-              'Stock Info',
-              'History Save',
-              'LINE / Discord',
-            ].map((service) => (
-              <div
-                key={service}
-                className="rounded-2xl border border-white/10 bg-black/30 p-4"
-              >
-                <p className="text-sm text-zinc-500">已整合</p>
-                <p className="mt-2 font-bold">{service}</p>
-              </div>
-            ))}
           </div>
         </section>
 
