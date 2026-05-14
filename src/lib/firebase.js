@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app'
-import { getAuth, GoogleAuthProvider } from 'firebase/auth'
+import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 
 const firebaseConfig = {
@@ -11,10 +11,14 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 }
 
-const hasFirebaseConfig = Object.values(firebaseConfig).every(Boolean)
+export const firebaseReady = Boolean(
+  firebaseConfig.apiKey &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.projectId &&
+    firebaseConfig.appId
+)
 
-export const app = hasFirebaseConfig ? initializeApp(firebaseConfig) : null
+const app = firebaseReady ? initializeApp(firebaseConfig) : null
+
 export const auth = app ? getAuth(app) : null
 export const db = app ? getFirestore(app) : null
-export const googleProvider = new GoogleAuthProvider()
-export const isFirebaseConfigured = hasFirebaseConfig
