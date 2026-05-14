@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react'
 import { auth, db, firebaseReady } from './lib/firebase'
 import TaiwanStockChart from './components/TaiwanStockChart'
 import {
+  fetchTaiwanStockPrices,
+  fetchTaiwanStockInfo,
+} from './lib/finmind'
+import { analyzeTaiwanStock } from './lib/technicalAnalysis'
+import {
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
@@ -9,98 +14,82 @@ import {
 } from 'firebase/auth'
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 
-const stockNames = {
+const backupStockNames = {
   2330: '台積電',
   2317: '鴻海',
   2454: '聯發科',
   2377: '微星',
   2303: '聯電',
   2603: '長榮',
+  2609: '陽明',
+  2615: '萬海',
   2618: '長榮航',
   2881: '富邦金',
   2882: '國泰金',
 }
 
-const stockAnalysis = {
-  2330: {
-    price: '950.0',
-    support: '910.00',
-    resistance: '980.00',
-    riskReward: '2.75',
-    status: '偏多觀察',
-    pattern: '高檔整理',
-    rsi: '62，中性偏強',
-    macd: '多方動能延續',
-    suggestion: '等待突破壓力位後再加碼',
-  },
-  2317: {
-    price: '185.5',
-    support: '176.00',
-    resistance: '193.00',
-    riskReward: '1.79',
-    status: '觀察中',
-    pattern: '區間震盪',
-    rsi: '48，中性',
-    macd: '動能尚未明確',
-    suggestion: '等站回短均線再評估',
-  },
-  2377: {
-    price: '107.5',
-    support: '96.75',
-    resistance: '114.00',
-    riskReward: '6.01',
-    status: '相對安全',
-    pattern: '多頭吞噬，底部反轉',
-    rsi: '56，中性偏多',
-    macd: '黃金交叉尚未失效',
-    suggestion: '等待量能放大後續攻',
-  },
-  2454: {
-    price: '1,250.0',
-    support: '1,180.00',
-    resistance: '1,310.00',
-    riskReward: '1.86',
-    status: '偏多觀察',
-    pattern: '均線多頭排列',
-    rsi: '59，中性偏多',
-    macd: '多方動能延續',
-    suggestion: '等待回測支撐不破再觀察',
-  },
+const defaultAnalysis = {
+  price: '等待分析',
+  support: '等待分析',
+  resistance: '等待分析',
+  riskReward: '等待分析',
+  status: '尚未分析',
+  pattern: '請輸入股票代號並按 AI 分析',
+  rsi: '等待分析',
+  macd: '等待分析',
+  suggestion: '目前尚未取得 FinMind 資料',
 }
 
 export default function App() {
   const [user, setUser] = useState(null)
   const [member, setMember] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [analyzing, setAnalyzing] = useState(false)
   const [stockInput, setStockInput] = useState('2377')
   const [selectedStock, setSelectedStock] = useState('2377')
+  const [stockInfoMap, setStockInfoMap] = useState({})
+  const [analysis, setAnalysis] = useState(defaultAnalysis)
+  const [lastAnalyzedAt, setLastAnalyzedAt] = useState('')
 
   const watchlist = [
-    { code: '2330', name: '台積電', signal: 'AI 看多' },
-    { code: '2317', name: '鴻海', signal: '觀察中' },
-    { code: '2454', name: '聯發科', signal: 'AI 看多' },
-    { code: '2377', name: '微星', signal: '底部反轉' },
+    { code: '2330', name: stockInfoMap['2330'] || '台積電', signal: 'AI 看多' },
+    { code: '2317', name: stockInfoMap['2317'] || '鴻海', signal: '觀察中' },
+    { code: '2454', name: stockInfoMap['2454'] || '聯發科', signal: 'AI 看多' },
+    { code: '2377', name: stockInfoMap['2377'] || '微星', signal: '底部反轉' },
   ]
 
-  const currentName = stockNames[selectedStock] || '台股'
-  const analysis =
-    stockAnalysis[selectedStock] || {
-      price: '即時更新',
-      support: '計算中',
-      resistance: '計算中',
-      riskReward: '計算中',
-      status: 'AI 分析中',
-      pattern: '等待資料同步',
-      rsi: '等待資料同步',
-      macd: '等待資料同步',
-      suggestion: '目前先以 FinMind 台股 K 線觀察趨勢',
-    }
+  const currentName =
+    stockInfoMap[selectedStock] || backupStockNames[selectedStock] || '台股'
 
   const notifications = [
     `${selectedStock} ${currentName} 已切換分析標的`,
-    '2330 台積電突破短線壓力位',
-    '2317 鴻海跌破防守位，建議觀察',
+    lastAnalyzedAt ? `最近分析時間：${lastAnalyzedAt}` : '尚未執行 FinMind 分析',
+    Object.keys(stockInfoMap).length > 0
+      ? '台股名稱資料已同步'
+      : '台股名稱資料同步中',
   ]
+
+  useEffect(() => {
+    async function loadStockInfo() {
+      try {
+        const info = await fetchTaiwanStockInfo()
+
+        const map = info.reduce((result, item) => {
+          if (item.stockId && item.stockName) {
+            result[item.stockId] = item.stockName
+          }
+
+          return result
+        }, {})
+
+        setStockInfoMap(map)
+      } catch (error) {
+        console.error('Stock info load error:', error)
+      }
+    }
+
+    loadStockInfo()
+  }, [])
 
   useEffect(() => {
     if (!firebaseReady) {
@@ -160,6 +149,29 @@ export default function App() {
     return () => unsubscribe()
   }, [])
 
+  const runAnalysis = async (stockCode) => {
+    setAnalyzing(true)
+
+    try {
+      const rows = await fetchTaiwanStockPrices(stockCode, 180)
+      const result = analyzeTaiwanStock(rows)
+
+      setAnalysis(result)
+      setLastAnalyzedAt(new Date().toLocaleString('zh-TW'))
+    } catch (error) {
+      console.error('Analyze error:', error)
+
+      setAnalysis({
+        ...defaultAnalysis,
+        status: '分析失敗',
+        pattern: error.message || 'FinMind 資料讀取失敗',
+        suggestion: '請確認股票代號是否正確，或稍後再試',
+      })
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
   const handleGoogleLogin = async () => {
     if (!firebaseReady) {
       alert('Firebase 尚未設定完成，請確認 .env 設定。')
@@ -183,7 +195,7 @@ export default function App() {
     }
   }
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     const cleaned = stockInput.trim().replace(/\D/g, '')
 
     if (!cleaned) {
@@ -192,11 +204,13 @@ export default function App() {
     }
 
     setSelectedStock(cleaned)
+    await runAnalysis(cleaned)
   }
 
-  const handleQuickSelect = (code) => {
+  const handleQuickSelect = async (code) => {
     setStockInput(code)
     setSelectedStock(code)
+    await runAnalysis(code)
   }
 
   const memberPlanText = member?.plan === 'pro' ? 'Pro 會員' : '免費會員'
@@ -263,9 +277,10 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleAnalyze}
-                className="rounded-2xl bg-emerald-500 px-6 py-4 font-bold text-black hover:bg-emerald-400"
+                disabled={analyzing}
+                className="rounded-2xl bg-emerald-500 px-6 py-4 font-bold text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                AI 分析
+                {analyzing ? '分析中...' : 'AI 分析'}
               </button>
             </div>
 
@@ -275,6 +290,7 @@ export default function App() {
                   type="button"
                   key={stock.code}
                   onClick={() => handleQuickSelect(stock.code)}
+                  disabled={analyzing}
                   className={`rounded-full px-4 py-2 text-sm font-semibold ${
                     selectedStock === stock.code
                       ? 'bg-emerald-500 text-black'
@@ -323,7 +339,7 @@ export default function App() {
                 <p>• AI 判斷：{analysis.status}</p>
                 <p>• K 棒型態：{analysis.pattern}</p>
                 <p>• RSI：{analysis.rsi}</p>
-                <p>• MACD：{analysis.macd}</p>
+                <p>• MACD / 趨勢：{analysis.macd}</p>
                 <p>• 建議：{analysis.suggestion}</p>
               </div>
             </div>
@@ -342,8 +358,8 @@ export default function App() {
                 <p>✓ Google 登入</p>
                 <p>✓ Firestore 會員資料同步</p>
                 <p>✓ 免費會員自選股上限：{member?.watchlistLimit || 3} 檔</p>
-                <p>✓ Pro 會員可解鎖無限自選股</p>
-                <p>✓ 後續可接 LINE / Discord 通知</p>
+                <p>✓ FinMind 台股資料分析</p>
+                <p>✓ 自動取得台股名稱</p>
               </div>
 
               <button
@@ -363,7 +379,8 @@ export default function App() {
                     type="button"
                     key={stock.code}
                     onClick={() => handleQuickSelect(stock.code)}
-                    className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-left hover:bg-white/10"
+                    disabled={analyzing}
+                    className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-left hover:bg-white/10 disabled:opacity-60"
                   >
                     <div>
                       <p className="font-bold">{stock.code}</p>
@@ -501,15 +518,15 @@ export default function App() {
               'Firebase Auth',
               'Firestore DB',
               'FinMind API',
-              'Lightweight Charts',
-              'OpenAI AI Engine',
+              'Stock Info',
+              'Technical Analysis',
               'LINE / Discord',
             ].map((service) => (
               <div
                 key={service}
                 className="rounded-2xl border border-white/10 bg-black/30 p-4"
               >
-                <p className="text-sm text-zinc-500">已規劃</p>
+                <p className="text-sm text-zinc-500">已整合</p>
                 <p className="mt-2 font-bold">{service}</p>
               </div>
             ))}

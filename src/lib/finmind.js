@@ -34,3 +34,28 @@ export async function fetchTaiwanStockPrices(stockId, daysBack = 120) {
     volume: Number(item.Trading_Volume || 0),
   }))
 }
+
+export async function fetchTaiwanStockInfo() {
+  const params = new URLSearchParams({
+    dataset: 'TaiwanStockInfo',
+  })
+
+  const response = await fetch(`${FINMIND_BASE_URL}?${params.toString()}`)
+
+  if (!response.ok) {
+    throw new Error(`FinMind StockInfo API error: ${response.status}`)
+  }
+
+  const json = await response.json()
+
+  if (!json.data || !Array.isArray(json.data)) {
+    throw new Error('FinMind 股票名稱資料回傳格式不正確')
+  }
+
+  return json.data.map((item) => ({
+    stockId: item.stock_id,
+    stockName: item.stock_name,
+    type: item.type,
+    industryCategory: item.industry_category,
+  }))
+}
