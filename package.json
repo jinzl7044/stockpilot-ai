@@ -1,11 +1,11 @@
 {
   "name": "stockpilot-ai",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node ./node_modules/vite/bin/vite.js build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -13,13 +13,11 @@
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "lucide-react": "latest",
-    "firebase": "latest"
-  },
-  "devDependencies": {
+    "firebase": "latest",
     "tailwindcss": "latest",
+    "@tailwindcss/postcss": "latest",
     "postcss": "latest",
-    "autoprefixer": "latest",
-    "@tailwindcss/postcss": "latest"
-  }
+    "autoprefixer": "latest"
+  },
+  "devDependencies": {}
 }
