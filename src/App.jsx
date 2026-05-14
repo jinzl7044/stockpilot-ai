@@ -7,6 +7,10 @@ import {
 } from './lib/finmind'
 import { analyzeTaiwanStock } from './lib/technicalAnalysis'
 import {
+  fetchAnalysisHistory,
+  saveAnalysisHistory,
+} from './lib/analysisHistory'
+import {
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
@@ -55,6 +59,7 @@ export default function App() {
   const [stockInfoMap, setStockInfoMap] = useState({})
   const [analysis, setAnalysis] = useState(defaultAnalysis)
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState('')
+  const [history, setHistory] = useState([])
 
   const watchlist = [
     { code: '2330', name: stockInfoMap['2330'] || '台積電', signal: 'AI 看多' },
@@ -141,8 +146,12 @@ export default function App() {
 
             setMember(oldMember)
           }
+
+          const recentHistory = await fetchAnalysisHistory(db, currentUser)
+          setHistory(recentHistory)
         } else {
           setMember(null)
+          setHistory([])
         }
       } catch (error) {
         console.error('Firebase member sync error:', error)
@@ -154,15 +163,38 @@ export default function App() {
     return () => unsubscribe()
   }, [])
 
+  const refreshHistory = async (targetUser = user) => {
+    if (!db || !targetUser) return
+
+    try {
+      const recentHistory = await fetchAnalysisHistory(db, targetUser)
+      setHistory(recentHistory)
+    } catch (error) {
+      console.error('History load error:', error)
+    }
+  }
+
   const runAnalysis = async (stockCode) => {
     setAnalyzing(true)
 
     try {
       const rows = await fetchTaiwanStockPrices(stockCode, 180)
       const result = analyzeTaiwanStock(rows)
+      const stockName =
+        stockInfoMap[stockCode] || backupStockNames[stockCode] || '台股'
 
       setAnalysis(result)
       setLastAnalyzedAt(new Date().toLocaleString('zh-TW'))
+
+      if (user && db) {
+        await saveAnalysisHistory(db, user, {
+          stockCode,
+          stockName,
+          analysis: result,
+        })
+
+        await refreshHistory(user)
+      }
     } catch (error) {
       console.error('Analyze error:', error)
 
@@ -217,6 +249,12 @@ export default function App() {
     setStockInput(code)
     setSelectedStock(code)
     await runAnalysis(code)
+  }
+
+  const formatHistoryTime = (createdAt) => {
+    if (!createdAt?.toDate) return '剛剛'
+
+    return createdAt.toDate().toLocaleString('zh-TW')
   }
 
   const memberPlanText = member?.plan === 'pro' ? 'Pro 會員' : '免費會員'
@@ -371,7 +409,7 @@ export default function App() {
                 <p>✓ Firestore 會員資料同步</p>
                 <p>✓ FinMind 台股資料</p>
                 <p>✓ 進場 / 停損 / 停利分析</p>
-                <p>✓ 自動取得台股名稱</p>
+                <p>✓ 分析紀錄儲存</p>
               </div>
 
               <button
@@ -432,6 +470,53 @@ export default function App() {
 
           <div className="space-y-6">
             <div className="rounded-3xl border border-white/10 bg-zinc-900 p-6">
+              <h3 className="mb-4 text-2xl font-bold">最近分析紀錄</h3>
+
+              {!user && (
+                <p className="text-sm text-zinc-400">
+                  登入後會自動儲存你的分析紀錄。
+                </p>
+              )}
+
+              {user && history.length === 0 && (
+                <p className="text-sm text-zinc-400">
+                  尚無分析紀錄。請先輸入股票代號並按 AI 分析。
+                </p>
+              )}
+
+              <div className="space-y-3">
+                {history.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-white/10 bg-black/30 p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-bold">
+                          {item.stockCode} {item.stockName}
+                        </p>
+                        <p className="text-sm text-zinc-400">
+                          {formatHistoryTime(item.createdAt)}
+                        </p>
+                      </div>
+
+                      <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-sm font-semibold text-emerald-300">
+                        {item.tradeAction || '已分析'}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-zinc-300">
+                      <p>現價：{item.price}</p>
+                      <p>進場：{item.entryZone}</p>
+                      <p>停損：{item.stopLoss}</p>
+                      <p>停利：{item.takeProfit1}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-zinc-900 p-6">
               <h3 className="mb-4 text-2xl font-bold">LINE 通知</h3>
               <p className="mb-4 text-zinc-400">
                 股價到價、AI 訊號、停損提醒
@@ -481,7 +566,7 @@ export default function App() {
               'Firestore DB',
               'FinMind API',
               'Stock Info',
-              'Entry / Exit Plan',
+              'History Save',
               'LINE / Discord',
             ].map((service) => (
               <div
