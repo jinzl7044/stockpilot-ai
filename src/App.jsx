@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { auth, db, firebaseReady } from './lib/firebase'
+import TradingViewWidget from './components/TradingViewWidget'
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -124,7 +125,7 @@ export default function App() {
               6767sixseven
             </h1>
             <p className="text-sm text-zinc-400">
-              股票分析與交易67平台
+              AI 股票分析與交易提醒平台
             </p>
           </div>
 
@@ -260,7 +261,9 @@ export default function App() {
         <section className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
           <div className="rounded-3xl border border-white/10 bg-zinc-900 p-6">
             <div className="mb-5 flex items-center justify-between">
-              <h3 className="text-2xl font-bold">TradingView K 線</h3>
+              <h3 className="text-2xl font-bold">TradingView 專業K線區塊
+              
+              </h3>
 
               <div className="flex gap-2">
                 {['1D', '1W', '1M'].map((tab) => (
@@ -274,9 +277,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex h-[420px] items-center justify-center rounded-3xl border border-dashed border-white/10 bg-black/30 text-zinc-500">
-              TradingView 專業 K 線區塊
-            </div>
+            <TradingViewWidget symbol="TWSE:2377" />
           </div>
 
           <div className="space-y-6">
@@ -356,7 +357,7 @@ export default function App() {
             <div>
               <h3 className="text-3xl font-black">系統整合狀態</h3>
               <p className="mt-1 text-zinc-400">
-                StockPilot AI 雲端整合模組
+                6767sixseven 雲端整合模組
               </p>
             </div>
 
